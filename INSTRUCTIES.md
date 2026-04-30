@@ -22,13 +22,11 @@ Supabase  ──signed URL──►  Pi (downloadt + cachet)
 
 ---
 
-## Wat Stijn vooraf doet (1 minuut)
+## Wat Stijn al heeft gedaan
 
-**Deploy key toevoegen wanneer Max die in stap 3 stuurt.**
+✅ Max toegevoegd als collaborator op de repo. Max krijgt een GitHub-invite per mail/notificatie. **Accepteer die eerst** vóór je verder gaat met onderstaande stappen.
 
-Wanneer Max in stap 3 z'n public key naar je stuurt: ga naar https://github.com/stinoe21/kaires-pi/settings/keys → **Add deploy key** → titel `kai-pi-01`, paste pubkey, **read access only** (geen write), Add key.
-
-(Supabase + store-creds staan al ingevuld in stap 5 hieronder. De anon-key is publiek-veilig: zelfde sleutel als die de webapp `kaires.com` in z'n JS bundle ship — RLS doet de echte access control.)
+(Supabase + store-creds staan al ingevuld in stap 4 hieronder. De anon-key is publiek-veilig: zelfde sleutel als die de webapp `kaires.com` in z'n JS bundle ship — RLS doet de echte access control.)
 
 ---
 
@@ -42,56 +40,50 @@ Eén keer SSH'en, daarna copy-paste van de blokken hieronder.
 ssh kai@kai.local
 ```
 
-### 2. Bestaande Python-server uitzetten + Node.js installeren
+### 2. Bestaande Python-server uitzetten + Node.js + GitHub CLI installeren
 
 ```bash
 # Python-server killen
 pkill -f 'http.server 8000' || true
 
-# Node.js 20 + git
+# Node.js 20 + git + gh
 sudo apt update
 sudo apt install -y git curl ca-certificates
+
+# Node.js 20 via NodeSource
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
+
+# GitHub CLI via official repo
+(type -p wget >/dev/null || (sudo apt install wget -y)) \
+  && sudo mkdir -p -m 755 /etc/apt/keyrings \
+  && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+  && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+  && sudo apt update \
+  && sudo apt install -y gh
 
 # Verify
 node --version    # moet v20.x zijn
 npm --version
+gh --version
 ```
 
-### 3. SSH deploy key voor GitHub
+### 3. GitHub-auth + repo clonen
 
 ```bash
-ssh-keygen -t ed25519 -f ~/.ssh/github_deploy -N "" -C "kai-pi-01"
+# Login met je GitHub-account (browser-flow, kopieer de one-time code)
+gh auth login --web --git-protocol https
+# Kies: GitHub.com → HTTPS → "Login with a web browser" → plak de code in de browser
 
-# Configure SSH om deze key te gebruiken voor github.com
-cat >> ~/.ssh/config <<'EOF'
-Host github.com
-  IdentityFile ~/.ssh/github_deploy
-  IdentitiesOnly yes
-EOF
-chmod 600 ~/.ssh/config
-
-# Toon de pubkey — stuur deze naar Stijn via signal/whatsapp:
-cat ~/.ssh/github_deploy.pub
-```
-
-**Stop hier tot Stijn de key heeft toegevoegd in GitHub.** Dat duurt < 1 min.
-
-### 4. Repo clonen + dependencies
-
-```bash
-# Test of de deploy key werkt
-ssh -T git@github.com
-# Verwacht: "Hi stinoe21/kaires-pi! You've successfully authenticated..."
-
+# Clone de repo + npm install
 cd ~
-git clone git@github.com:stinoe21/kaires-pi.git
+gh repo clone stinoe21/kaires-pi
 cd kaires-pi
 npm install
 ```
 
-### 5. .env vullen
+### 4. .env vullen
 
 ```bash
 cp .env.example .env
@@ -133,7 +125,7 @@ Save & exit (Ctrl+O, Enter, Ctrl+X).
 > EOF
 > ```
 
-### 6. Eerste run — eerst test-playlist (geen Supabase nodig)
+### 5. Eerste run — eerst test-playlist (geen Supabase nodig)
 
 Bewijst dat de HTTP-server + cache + browser-flow werkt vóór we Supabase erbij betrekken:
 
@@ -147,7 +139,7 @@ Output: `HTTP-server live op poort 8000` + LAN IPs (bv. `http://192.168.5.22:800
 
 Als dit werkt → Ctrl+C in de Pi-terminal.
 
-### 7. Live met Supabase
+### 6. Live met Supabase
 
 ```bash
 npm start
@@ -169,7 +161,7 @@ Output zou moeten zijn:
 [lan-http] Queued: <Artist> — <Title>
 ```
 
-In browser: refresh pagina als die nog van stap 6 open staat. Track komt automatisch binnen.
+In browser: refresh pagina als die nog van stap 5 open staat. Track komt automatisch binnen.
 
 In het admin-dashboard van kaires.com: rij verschijnt in `pilot_heartbeat` met `provider='pi'`.
 
