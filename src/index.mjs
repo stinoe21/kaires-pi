@@ -72,9 +72,9 @@ process.on('unhandledRejection', (err) => {
 // ── Test mode ────────────────────────────────────────────────────────────
 
 const TEST_PLAYLIST = [
-  { id: 'test-1', url: 'https://archive.org/download/testmp3testfile/mpthreetest.mp3', title: 'SoundHelix Test 1', artist: 'SoundHelix' },
-  { id: 'test-2', url: 'https://www.kozco.com/tech/piano2-Audacity1.2.5.mp3',           title: 'Piano Test',       artist: 'Kozco' },
-  { id: 'test-3', url: 'https://www2.cs.uic.edu/~i101/SoundFiles/StarWars3.wav',         title: 'Star Wars Quote',  artist: 'UIC samples' },
+  { id: 'test-1', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', title: 'SoundHelix Song 1', artist: 'SoundHelix' },
+  { id: 'test-2', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', title: 'SoundHelix Song 2', artist: 'SoundHelix' },
+  { id: 'test-3', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3', title: 'SoundHelix Song 3', artist: 'SoundHelix' },
 ];
 
 async function runTestMode() {
@@ -91,8 +91,9 @@ async function runTestMode() {
       log(`Pulse-fout: ${err.message}`);
     }
   }
-  log('Test-playlist voltooid.');
-  await shutdown('test-done');
+  log('Test-playlist voltooid — server blijft draaien voor diagnostiek (Ctrl+C om te stoppen).');
+  // Bewust geen shutdown: bij dode URLs of debugging wil je de browser-state behouden
+  await new Promise(() => {}); // wacht oneindig op SIGINT/SIGTERM
 }
 
 // ── Library mode ─────────────────────────────────────────────────────────

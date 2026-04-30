@@ -85,7 +85,21 @@ export async function fetchToCache(remoteUrl, trackId) {
   log(`MISS ${filename} — download van ${remoteUrl.slice(0, 60)}...`);
   const startedAt = Date.now();
 
-  const res = await fetch(remoteUrl);
+  // 30s timeout — dode URLs mogen de pulse-loop niet blokkeren
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  let res;
+  try {
+    res = await fetch(remoteUrl, { signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Download timeout (30s) voor ${remoteUrl}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+
   if (!res.ok) {
     throw new Error(`Download faalde voor ${remoteUrl}: HTTP ${res.status}`);
   }
