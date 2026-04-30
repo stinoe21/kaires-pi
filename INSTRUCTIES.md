@@ -22,23 +22,13 @@ Supabase  ──signed URL──►  Pi (downloadt + cachet)
 
 ---
 
-## Wat Stijn vooraf doet (3 minuten)
+## Wat Stijn vooraf doet (1 minuut)
 
-### 1. Beauty-X creds verzamelen
+**Deploy key toevoegen wanneer Max die in stap 3 stuurt.**
 
-Uit de webapp `.env` of admin-dashboard:
+Wanneer Max in stap 3 z'n public key naar je stuurt: ga naar https://github.com/stinoe21/kaires-pi/settings/keys → **Add deploy key** → titel `kai-pi-01`, paste pubkey, **read access only** (geen write), Add key.
 
-```
-SUPABASE_URL=...           (https://hdvekzlkopoivvcrwlor.supabase.co)
-SUPABASE_ANON_KEY=eyJh...  (publieke anon key)
-KAIRES_STORE_ID=31ca6e56-0f24-4b5b-897a-2a1b1c73f4f5  (Beauty-X UUID)
-```
-
-Stuur deze 3 waardes naar Max via signal/whatsapp/iMessage.
-
-### 2. Deploy key voorbereiden (wacht op stap 4 hieronder)
-
-Wanneer Max in stap 4 z'n public key naar je stuurt: ga naar https://github.com/stinoe21/kaires-pi/settings/keys → **Add deploy key** → titel `kai-pi-01`, paste pubkey, **read access only** (geen write), Add key.
+(Supabase + store-creds staan al ingevuld in stap 5 hieronder. De anon-key is publiek-veilig: zelfde sleutel als die de webapp `kaires.com` in z'n JS bundle ship — RLS doet de echte access control.)
 
 ---
 
@@ -108,7 +98,7 @@ cp .env.example .env
 nano .env
 ```
 
-Vul deze waardes in (krijg je van Stijn):
+Vul deze blok onderaan / aan (overschrijft de defaults waar nodig):
 
 ```env
 KAIRES_OUTPUT=lan-http
@@ -118,7 +108,7 @@ KAIRES_STORE_ID=31ca6e56-0f24-4b5b-897a-2a1b1c73f4f5
 KAIRES_STORE_NAME=Beauty-X (Pi-test)
 
 SUPABASE_URL=https://hdvekzlkopoivvcrwlor.supabase.co
-SUPABASE_ANON_KEY=eyJ...   # (krijg je van Stijn)
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhkdmVremxrb3BvaXZ2Y3J3bG9yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEzNjI1NDksImV4cCI6MjA4NjkzODU0OX0.AMNMhG0sW7lchf0P8fSWnFOdFpx-ZoXM8NwrugozMEA
 
 KAIRES_HTTP_PORT=8000
 KAIRES_CACHE_DIR=audio-cache
@@ -126,6 +116,22 @@ KAIRES_CACHE_MAX_FILES=20
 ```
 
 Save & exit (Ctrl+O, Enter, Ctrl+X).
+
+> **Sneller alternatief** — vervang de hele inhoud in één commando i.p.v. nano:
+>
+> ```bash
+> cat > .env <<'EOF'
+> KAIRES_OUTPUT=lan-http
+> KAIRES_USE_TEST_PLAYLIST=0
+> KAIRES_STORE_ID=31ca6e56-0f24-4b5b-897a-2a1b1c73f4f5
+> KAIRES_STORE_NAME=Beauty-X (Pi-test)
+> SUPABASE_URL=https://hdvekzlkopoivvcrwlor.supabase.co
+> SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhkdmVremxrb3BvaXZ2Y3J3bG9yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEzNjI1NDksImV4cCI6MjA4NjkzODU0OX0.AMNMhG0sW7lchf0P8fSWnFOdFpx-ZoXM8NwrugozMEA
+> KAIRES_HTTP_PORT=8000
+> KAIRES_CACHE_DIR=audio-cache
+> KAIRES_CACHE_MAX_FILES=20
+> EOF
+> ```
 
 ### 6. Eerste run — eerst test-playlist (geen Supabase nodig)
 
