@@ -1,0 +1,19 @@
+{
+  "name": "kaires-pi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kaires Pi runtime — silent worker for Sonos/UPnP/ALSA output adapters",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "discover": "node src/discover.mjs",
+    "sanity": "node src/sanity.mjs",
+    "play-test": "node src/play-test.mjs",
+    "start": "node src/index.mjs"
+  },
+  "dependencies": {
+    "sonos": "1.14.3"
+  }
+}
