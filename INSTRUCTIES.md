@@ -26,7 +26,7 @@ Supabase  ──signed URL──►  Pi (downloadt + cachet)
 
 ✅ Max toegevoegd als collaborator op de repo. Max krijgt een GitHub-invite per mail/notificatie. **Accepteer die eerst** vóór je verder gaat met onderstaande stappen.
 
-(Supabase + store-creds staan al ingevuld in stap 4 hieronder. De anon-key is publiek-veilig: zelfde sleutel als die de webapp `kaires.com` in z'n JS bundle ship — RLS doet de echte access control.)
+(Supabase + store-creds staan al ingevuld in stap 4 hieronder. De anon-key is publiek-veilig: zelfde sleutel als die de webapp `app.kaires.nl` in z'n JS bundle ship — RLS doet de echte access control.)
 
 ---
 
@@ -163,7 +163,7 @@ Output zou moeten zijn:
 
 In browser: refresh pagina als die nog van stap 5 open staat. Track komt automatisch binnen.
 
-In het admin-dashboard van kaires.com: rij verschijnt in `pilot_heartbeat` met `provider='pi'`.
+In het admin-dashboard van app.kaires.nl: rij verschijnt in `pilot_heartbeat` met `provider='pi'`.
 
 ---
 

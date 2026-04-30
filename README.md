@@ -6,7 +6,7 @@ Silent worker voor Kaires-curatie op Raspberry Pi. Draait de CAS-engine en stuur
 
 ```
                   ┌─────────────────────────┐
-                  │  Vercel webapp + admin  │  kaires.com
+                  │  Vercel webapp + admin  │  app.kaires.nl
                   │       (dashboard)       │
                   └────────────┬────────────┘
                                │  read/write
