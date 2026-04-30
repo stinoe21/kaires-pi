@@ -1,17 +1,26 @@
-// Kaires Pi runtime entry — iteratie 2b (library + heartbeat).
+// Kaires Pi runtime entry — iteratie 2c (lan-http rehost-mode bij).
 //
-// Twee modi via KAIRES_USE_TEST_PLAYLIST:
-//   1 = test mode  → 3 hardcoded test-MP3s, geen Supabase, voor on-site UPnP-validatie
-//   0 = library    → DNA + realtime context + CAS-ranked tracks uit Supabase + heartbeat
+// Output adapters (KAIRES_OUTPUT):
+//   sonos     — UPnP push naar Sonos (productie-pad)
+//   lan-http  — Pi serveert audio via HTTP, MacBook/browser/Sonos pulled
 //
-// Pulse-loop: per track één query (forward + dedup), play, wait-for-end, herhaal.
-// Geen vooruit-fetch queue zoals webapp; track-handoff is sequentieel.
+// Modi (KAIRES_USE_TEST_PLAYLIST):
+//   1 = test mode  → 3 hardcoded test-MP3s, geen Supabase nodig
+//   0 = library    → DNA + realtime context + CAS-ranked tracks uit Supabase
+//
+// In lan-http mode worden alle URLs door de audio-cache layer geleid: Pi
+// downloadt remote URL → audio-cache/<id>.<ext> → adapter speelt /audio/<id>.<ext>.
+// In sonos mode wordt de URL direct doorgegeven (Supabase signed URL); cache
+// kan later alsnog ingehaakt worden voor Sonos productie.
 
 import { config, summary, requireLibraryConfig } from './config.mjs';
 import * as sonos from './output-sonos.mjs';
+import * as lanHttp from './output-lan-http.mjs';
+import { fetchToCache } from './audio-cache.mjs';
 
 let running = true;
 let currentAdapter = null;
+let adapterName = null;
 let stopHeartbeat = () => {};
 
 function log(msg) {
@@ -21,14 +30,24 @@ function log(msg) {
 
 function selectAdapter() {
   switch (config.output) {
-    case 'sonos':
-      return sonos;
+    case 'sonos':    return { name: 'sonos',    impl: sonos };
+    case 'lan-http': return { name: 'lan-http', impl: lanHttp };
     case 'alsa':
     case 'dlna':
       throw new Error(`Output adapter "${config.output}" nog niet geïmplementeerd`);
     default:
       throw new Error(`Onbekende KAIRES_OUTPUT: ${config.output}`);
   }
+}
+
+// Resolve URL afhankelijk van adapter:
+//  - lan-http: download naar cache, retourneer relatieve /audio/<id>.<ext>
+//  - sonos: passthrough (Sonos pulled direct van Supabase voor MVP)
+async function resolveUrlForAdapter(remoteUrl, trackId) {
+  if (adapterName === 'lan-http') {
+    return fetchToCache(remoteUrl, trackId);
+  }
+  return remoteUrl;
 }
 
 async function shutdown(reason) {
@@ -53,19 +72,20 @@ process.on('unhandledRejection', (err) => {
 // ── Test mode ────────────────────────────────────────────────────────────
 
 const TEST_PLAYLIST = [
-  'https://archive.org/download/testmp3testfile/mpthreetest.mp3',
-  'https://www.kozco.com/tech/piano2-Audacity1.2.5.mp3',
-  'https://www2.cs.uic.edu/~i101/SoundFiles/StarWars3.wav',
+  { id: 'test-1', url: 'https://archive.org/download/testmp3testfile/mpthreetest.mp3', title: 'SoundHelix Test 1', artist: 'SoundHelix' },
+  { id: 'test-2', url: 'https://www.kozco.com/tech/piano2-Audacity1.2.5.mp3',           title: 'Piano Test',       artist: 'Kozco' },
+  { id: 'test-3', url: 'https://www2.cs.uic.edu/~i101/SoundFiles/StarWars3.wav',         title: 'Star Wars Quote',  artist: 'UIC samples' },
 ];
 
 async function runTestMode() {
   log(`Test-mode: ${TEST_PLAYLIST.length} hardcoded tracks`);
   for (let i = 0; i < TEST_PLAYLIST.length && running; i++) {
-    const url = TEST_PLAYLIST[i];
-    log(`Test pulse #${i + 1}: ${url}`);
+    const t = TEST_PLAYLIST[i];
+    log(`Test pulse #${i + 1}: ${t.artist} — ${t.title}`);
     try {
-      await currentAdapter.play(url);
-      const finalState = await currentAdapter.waitUntilEnded({ maxMs: 5 * 60_000 });
+      const playUrl = await resolveUrlForAdapter(t.url, t.id);
+      await currentAdapter.play(playUrl, { id: t.id, title: t.title, artist: t.artist });
+      const finalState = await currentAdapter.waitUntilEnded({ maxMs: 10 * 60_000 });
       log(`Track ${i + 1} klaar (${finalState})`);
     } catch (err) {
       log(`Pulse-fout: ${err.message}`);
@@ -80,8 +100,6 @@ async function runTestMode() {
 async function runLibraryMode() {
   requireLibraryConfig();
 
-  // Dynamic imports — alleen laden in library-mode zodat test-mode geen
-  // Supabase-creds vereist.
   const library = await import('./library.mjs');
   const heartbeat = await import('./heartbeat.mjs');
 
@@ -89,9 +107,6 @@ async function runLibraryMode() {
   heartbeat.startHeartbeat();
   stopHeartbeat = heartbeat.stopHeartbeat;
 
-  // DNA + context laden vóór pulse-loop. DNA wordt niet per pulse opnieuw
-  // gefetched — verandert zelden, refresh elke ~10 minuten via eenvoudige
-  // tijd-gate (stub voor MVP, echte refresh komt in 2c).
   let dna = await library.getStoreDNA(config.store.id);
   if (!dna) {
     log(`WAARSCHUWING: geen DNA voor store ${config.store.id} — gebruik defaults`);
@@ -103,7 +118,6 @@ async function runLibraryMode() {
   const DNA_REFRESH_MS = 10 * 60 * 1000;
 
   while (running) {
-    // Refresh DNA als ouder dan 10 min
     if (Date.now() - dnaFetchedAt > DNA_REFRESH_MS) {
       try {
         const fresh = await library.getStoreDNA(config.store.id);
@@ -114,7 +128,6 @@ async function runLibraryMode() {
       }
     }
 
-    // Realtime context elke pulse — verandert continu (foot traffic, noise, weer)
     let context = null;
     try {
       context = await library.getRealtimeContext(config.store.id);
@@ -144,7 +157,13 @@ async function runLibraryMode() {
     heartbeat.incrementPulse();
 
     try {
-      await currentAdapter.play(track.url);
+      const playUrl = await resolveUrlForAdapter(track.url, track.id);
+      await currentAdapter.play(playUrl, {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        cas: track.cas,
+      });
       const finalState = await currentAdapter.waitUntilEnded({ maxMs: 10 * 60_000 });
       log(`Track klaar (${finalState})`);
     } catch (err) {
@@ -158,7 +177,9 @@ async function runLibraryMode() {
 
 async function main() {
   log(`Bootstrap — config: ${JSON.stringify(summary())}`);
-  currentAdapter = selectAdapter();
+  const sel = selectAdapter();
+  currentAdapter = sel.impl;
+  adapterName = sel.name;
   await currentAdapter.connect();
 
   if (config.useTestPlaylist) {

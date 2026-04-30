@@ -3,7 +3,7 @@
 
 import 'dotenv/config';
 
-const VALID_OUTPUTS = ['sonos', 'alsa', 'dlna'];
+const VALID_OUTPUTS = ['sonos', 'lan-http', 'alsa', 'dlna'];
 
 function required(name) {
   const v = process.env[name];
@@ -49,6 +49,14 @@ export const config = {
   trackEndPollMs: Number(optional('KAIRES_TRACK_END_POLL_MS', '5000')),
   heartbeatIntervalMs: Number(optional('KAIRES_HEARTBEAT_INTERVAL_MS', '30000')),
   appVersion: optional('KAIRES_APP_VERSION', 'pi-dev'),
+  http: {
+    port: Number(optional('KAIRES_HTTP_PORT', '8000')),
+    bind: optional('KAIRES_HTTP_BIND', '0.0.0.0'),
+  },
+  cache: {
+    dir: optional('KAIRES_CACHE_DIR', 'audio-cache'),
+    maxFiles: Number(optional('KAIRES_CACHE_MAX_FILES', '20')),
+  },
 };
 
 export function summary() {
