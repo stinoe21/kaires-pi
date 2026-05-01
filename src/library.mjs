@@ -291,6 +291,9 @@ export async function fetchNextTrack({ storeId, dna, context }) {
       url,
       cas,
       params: targetParams,
+      // Used by the dashboard's progress-bar denominator. Null is OK — UI
+      // shows "0:00" rechts en bar fills via elapsed-only when unknown.
+      duration_ms: candidate.duration_ms ?? null,
     };
   }
 
