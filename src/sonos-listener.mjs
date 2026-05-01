@@ -94,9 +94,11 @@ export async function startSonosListener({ onChange }) {
       if (status === 'CLOSED') log('Realtime channel CLOSED');
     });
 
-  // Belt-and-suspenders: realtime kan om netwerk-redenen stilletjes droppen.
-  // Periodieke poll vangt missed events op zonder eind-user impact.
-  setInterval(() => { void syncFromDb('poll'); }, 30_000);
+  // Belt-and-suspenders: realtime SUBSCRIBED is in de huidige Pi-setup vaak
+  // niet stabiel, dus de poll is in de praktijk de primaire trigger. 2s
+  // houdt speaker-switch-feedback quasi-direct; per store 1 SELECT op een
+  // kleine indexed query — DB-load verwaarloosbaar.
+  setInterval(() => { void syncFromDb('poll'); }, 2_000);
 }
 
 export async function stopSonosListener() {

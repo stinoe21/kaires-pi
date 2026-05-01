@@ -129,7 +129,12 @@ export async function startPiControlListener({ onSkip, onPause, onPlay } = {}) {
       if (status === 'CLOSED') log('Realtime channel CLOSED');
     });
 
-  pollTimer = setInterval(() => { void syncFromDb('poll'); }, 30_000);
+  // Realtime-channel komt vaak niet tot SUBSCRIBED in de huidige Pi-setup,
+  // dus de poll-fallback is in de praktijk de primaire trigger. 2s is snel
+  // genoeg om skip/pause "instant" te laten voelen en blijft per store
+  // verwaarloosbaar (1 SELECT op 1 rij). Verhoog dit zodra realtime stabiel
+  // SUBSCRIBED-eventes geeft.
+  pollTimer = setInterval(() => { void syncFromDb('poll'); }, 2_000);
 }
 
 export async function stopPiControlListener() {
