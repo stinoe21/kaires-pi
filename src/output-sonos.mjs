@@ -1,6 +1,13 @@
 // Sonos output adapter — UPnP via npm `sonos`.
-// Verantwoordelijk voor: discovery, coordinator-detectie, play, end-detection.
-// Geen weet van CAS, library, of curatie — pure transport-laag.
+// Verantwoordelijk voor: connectie naar de actieve speaker, coordinator-detectie,
+// play, end-detection, en hot-switch wanneer het webapp-dashboard de
+// `is_active_output`-flag verzet. Geen weet van CAS, library, of curatie.
+//
+// Speaker-keuze:
+//   1. setTargetSpeaker(speaker)  — gezet door sonos-listener bij elke flip
+//   2. config.sonos.hintIp        — fallback voor situaties zonder DB-flag
+//      (lokale dev, geen Supabase, of speakers nog niet gepubliceerd)
+//   3. SSDP "first responder"     — last-resort, ongedefinieerd welke speaker
 
 import { DeviceDiscovery, Sonos } from 'sonos';
 import { config } from './config.mjs';
@@ -8,17 +15,14 @@ import { config } from './config.mjs';
 const SSDP_TIMEOUT_MS = 10_000;
 
 let coordinator = null;
+let currentTargetIp = null;
 
 function log(msg) {
   const ts = new Date().toISOString().slice(11, 23);
   console.log(`[${ts}] [sonos] ${msg}`);
 }
 
-async function discoverDevice() {
-  if (config.sonos.hintIp) {
-    log(`Verbinden via hint IP ${config.sonos.hintIp}`);
-    return new Sonos(config.sonos.hintIp);
-  }
+async function ssdpFirstDevice() {
   return new Promise((resolve, reject) => {
     log(`SSDP scan (max ${SSDP_TIMEOUT_MS / 1000}s)...`);
     const discovery = DeviceDiscovery({ timeout: SSDP_TIMEOUT_MS });
@@ -26,14 +30,14 @@ async function discoverDevice() {
     discovery.once('DeviceAvailable', (device) => {
       if (resolved) return;
       resolved = true;
-      discovery.destroy?.();
+      try { discovery.destroy?.(); } catch {}
       log(`Eerste device: ${device.host}`);
       resolve(device);
     });
     setTimeout(() => {
       if (resolved) return;
       resolved = true;
-      discovery.destroy?.();
+      try { discovery.destroy?.(); } catch {}
       reject(new Error('Geen Sonos gevonden binnen SSDP-timeout'));
     }, SSDP_TIMEOUT_MS);
   });
@@ -62,17 +66,72 @@ async function findCoordinator(device) {
   return device;
 }
 
+async function connectToIp(ip) {
+  const device = new Sonos(ip);
+  const coord = await findCoordinator(device);
+  const attrs = await coord.getZoneAttrs().catch(() => ({}));
+  log(`Verbonden met room "${attrs.CurrentZoneName ?? '?'}" op ${coord.host}`);
+  return coord;
+}
+
+/**
+ * Initiële connectie. Als noch setTargetSpeaker() noch hintIp gezet is,
+ * gooien we — er is geen zinvol target. De runtime moet dan de listener
+ * eerst draaien zodat de DB-target binnenkomt.
+ */
 export async function connect() {
   if (coordinator) return coordinator;
-  const device = await discoverDevice();
-  coordinator = await findCoordinator(device);
-  const attrs = await coordinator.getZoneAttrs();
-  log(`Verbonden met room "${attrs.CurrentZoneName}" op ${coordinator.host}`);
-  return coordinator;
+
+  if (currentTargetIp) {
+    coordinator = await connectToIp(currentTargetIp);
+    return coordinator;
+  }
+
+  if (config.sonos.hintIp) {
+    log(`Verbinden via hint IP ${config.sonos.hintIp} (DB-target nog niet bekend)`);
+    coordinator = await connectToIp(config.sonos.hintIp);
+    currentTargetIp = config.sonos.hintIp;
+    return coordinator;
+  }
+
+  log('Geen target gezet en geen hint IP — wacht op DB-target via sonos-listener');
+  // Niet hard falen — runtime mag idle blijven tot operator een speaker kiest.
+  return null;
+}
+
+/**
+ * Verzet het output-target naar een nieuwe Sonos. Stop eerst de huidige
+ * playback om dubbele audio te voorkomen tussen oud en nieuw target.
+ */
+export async function setTargetSpeaker(speaker) {
+  // null/undefined = "geen actieve speaker" — runtime moet idle.
+  const nextIp = speaker?.ip_address ?? null;
+  if (nextIp === currentTargetIp) return;
+
+  if (coordinator) {
+    try { await coordinator.stop(); } catch {}
+  }
+
+  if (!nextIp) {
+    log('Target-clear — Pi gaat idle');
+    coordinator = null;
+    currentTargetIp = null;
+    return;
+  }
+
+  log(`Switch target → ${speaker.room_name} @ ${nextIp}`);
+  currentTargetIp = nextIp;
+  coordinator = await connectToIp(nextIp);
+}
+
+export function hasTarget() {
+  return !!coordinator;
 }
 
 export async function play(url) {
-  if (!coordinator) await connect();
+  if (!coordinator) {
+    throw new Error('Geen actieve Sonos-speaker — kies een speaker in het dashboard');
+  }
   log(`Play: ${url}`);
   await coordinator.play(url);
 }

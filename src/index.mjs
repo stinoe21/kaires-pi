@@ -22,6 +22,7 @@ let running = true;
 let currentAdapter = null;
 let adapterName = null;
 let stopHeartbeat = () => {};
+let stopAuxiliaries = () => {};
 
 function log(msg) {
   const ts = new Date().toISOString().slice(11, 23);
@@ -55,6 +56,7 @@ async function shutdown(reason) {
   running = false;
   log(`Shutdown (${reason})...`);
   try { stopHeartbeat(); } catch {}
+  try { await stopAuxiliaries(); } catch {}
   if (currentAdapter) {
     await currentAdapter.stop().catch(() => {});
   }
@@ -104,15 +106,48 @@ async function runLibraryMode() {
   const { signIn } = await import('./lib/supabase.mjs');
   const library = await import('./library.mjs');
   const heartbeat = await import('./heartbeat.mjs');
+  const piDevice = await import('./pi-device.mjs');
 
   // Sign in BEFORE the heartbeat starts — heartbeat insert depends on the
   // session being live (RLS rejects anonymous writes).
   const piUserId = await signIn();
   log(`Pi-auth signed in as ${config.pi.email} (uid ${piUserId.slice(0, 8)}…)`);
 
+  // Register this Pi in pi_devices zodat het webapp-dashboard de Audio Output
+  // panel kan tonen. last_seen_at wordt elke heartbeat-tick ververst.
+  await piDevice.registerPiDevice();
+  piDevice.startTouchInterval();
+
   log(`Library-mode voor store ${config.store.id}`);
   heartbeat.startHeartbeat();
   stopHeartbeat = heartbeat.stopHeartbeat;
+
+  // Sonos-only: speakers naar dashboard publiceren + luisteren naar het
+  // is_active_output-vinkje zodat de operator/klant de output via de webapp
+  // kiest. Andere adapters (lan-http) hebben geen externe target-keuze.
+  if (adapterName === 'sonos') {
+    const discovery = await import('./sonos-discovery.mjs');
+    const listener = await import('./sonos-listener.mjs');
+    await discovery.startSonosDiscovery();
+    await listener.startSonosListener({
+      onChange: async (next) => {
+        try {
+          await currentAdapter.setTargetSpeaker(next);
+        } catch (err) {
+          log(`Speaker-switch faalde: ${err.message}`);
+        }
+      },
+    });
+    stopAuxiliaries = async () => {
+      try { piDevice.stopTouchInterval(); } catch {}
+      try { discovery.stopSonosDiscovery(); } catch {}
+      try { await listener.stopSonosListener(); } catch {}
+    };
+  } else {
+    stopAuxiliaries = async () => {
+      try { piDevice.stopTouchInterval(); } catch {}
+    };
+  }
 
   let dna = await library.getStoreDNA(config.store.id);
   if (!dna) {
@@ -125,6 +160,15 @@ async function runLibraryMode() {
   const DNA_REFRESH_MS = 10 * 60 * 1000;
 
   while (running) {
+    // Idle wanneer er geen output-target is (bv. Sonos-mode zonder gekozen
+    // speaker in het dashboard). Pi blijft online + heartbeat blijft draaien;
+    // we slaan alleen de pulse over zodat we geen tracks fetchen die nergens
+    // heen kunnen.
+    if (typeof currentAdapter.hasTarget === 'function' && !currentAdapter.hasTarget()) {
+      await new Promise(r => setTimeout(r, 5_000));
+      continue;
+    }
+
     if (Date.now() - dnaFetchedAt > DNA_REFRESH_MS) {
       try {
         const fresh = await library.getStoreDNA(config.store.id);
