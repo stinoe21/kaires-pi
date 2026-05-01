@@ -100,6 +100,11 @@ async function runTestMode() {
 
 // ── Library mode ─────────────────────────────────────────────────────────
 
+// Operator-pause flag — gezet door pi-control-listener wanneer de webapp
+// pause_requested op true zet. Pulse loop respecteert 'm: skip de fetch + play
+// totdat 'ie weer op false staat. Begint false (we draaien direct na startup).
+let pauseRequested = false;
+
 async function runLibraryMode() {
   requireLibraryConfig();
 
@@ -107,6 +112,8 @@ async function runLibraryMode() {
   const library = await import('./library.mjs');
   const heartbeat = await import('./heartbeat.mjs');
   const piDevice = await import('./pi-device.mjs');
+  const piState = await import('./pi-state.mjs');
+  const controlListener = await import('./pi-control-listener.mjs');
 
   // Sign in BEFORE the heartbeat starts — heartbeat insert depends on the
   // session being live (RLS rejects anonymous writes).
@@ -117,6 +124,31 @@ async function runLibraryMode() {
   // panel kan tonen. last_seen_at wordt elke heartbeat-tick ververst.
   await piDevice.registerPiDevice();
   piDevice.startTouchInterval();
+
+  // Reset playback state to 'idle' op startup zodat we niet met stale
+  // current_track_* van een vorige run draaien.
+  await piState.setIdle();
+
+  // Listen voor skip/pause-commando's vanuit het webapp-dashboard.
+  await controlListener.startPiControlListener({
+    onSkip: async () => {
+      // Stop de huidige track — waitUntilEnded() retourneert dan 'stopped' en
+      // de loop fetch automatisch de volgende. setIdle() niet nodig: de loop
+      // schrijft setNowPlaying() voor de volgende track of setIdle() bij geen
+      // track.
+      try { await currentAdapter.stop(); } catch {}
+      try { await piState.clearSkipRequest(); } catch {}
+    },
+    onPause: async () => {
+      pauseRequested = true;
+      try { await currentAdapter.stop(); } catch {}
+      try { await piState.setPaused(); } catch {}
+    },
+    onPlay: async () => {
+      pauseRequested = false;
+      // De pulse loop pikt 'm vanzelf weer op binnen 5s.
+    },
+  });
 
   log(`Library-mode voor store ${config.store.id}`);
   heartbeat.startHeartbeat();
@@ -142,10 +174,14 @@ async function runLibraryMode() {
       try { piDevice.stopTouchInterval(); } catch {}
       try { discovery.stopSonosDiscovery(); } catch {}
       try { await listener.stopSonosListener(); } catch {}
+      try { await controlListener.stopPiControlListener(); } catch {}
+      try { await piState.setIdle(); } catch {}
     };
   } else {
     stopAuxiliaries = async () => {
       try { piDevice.stopTouchInterval(); } catch {}
+      try { await controlListener.stopPiControlListener(); } catch {}
+      try { await piState.setIdle(); } catch {}
     };
   }
 
@@ -159,15 +195,38 @@ async function runLibraryMode() {
   let dnaFetchedAt = Date.now();
   const DNA_REFRESH_MS = 10 * 60 * 1000;
 
+  let lastIdleWrittenForReason = null;
+  const ensureIdleState = async (reason) => {
+    if (lastIdleWrittenForReason === reason) return;
+    lastIdleWrittenForReason = reason;
+    if (reason === 'paused') {
+      try { await piState.setPaused(); } catch {}
+    } else {
+      try { await piState.setIdle(); } catch {}
+    }
+  };
+
   while (running) {
+    // Pause-mode: webapp heeft pause_requested gezet. Loop blijft idle tot
+    // play_requested-flip de pauseRequested vlag op false zet. Heartbeat
+    // blijft doorlopen zodat het dashboard ziet dat we leven.
+    if (pauseRequested) {
+      await ensureIdleState('paused');
+      await new Promise(r => setTimeout(r, 2_000));
+      continue;
+    }
+
     // Idle wanneer er geen output-target is (bv. Sonos-mode zonder gekozen
     // speaker in het dashboard). Pi blijft online + heartbeat blijft draaien;
     // we slaan alleen de pulse over zodat we geen tracks fetchen die nergens
     // heen kunnen.
     if (typeof currentAdapter.hasTarget === 'function' && !currentAdapter.hasTarget()) {
+      await ensureIdleState('no_target');
       await new Promise(r => setTimeout(r, 5_000));
       continue;
     }
+    // Niet-idle pad: reset zodat de eerstvolgende terugval wel weer geschreven wordt.
+    lastIdleWrittenForReason = null;
 
     if (Date.now() - dnaFetchedAt > DNA_REFRESH_MS) {
       try {
@@ -199,6 +258,8 @@ async function runLibraryMode() {
 
     if (!track) {
       log(`Geen track — wacht ${config.pulseIntervalMs / 1000}s en probeer opnieuw`);
+      try { await piState.setIdle(); } catch {}
+      lastIdleWrittenForReason = 'no_track';
       await new Promise(r => setTimeout(r, config.pulseIntervalMs));
       continue;
     }
@@ -208,6 +269,9 @@ async function runLibraryMode() {
     heartbeat.incrementPulse();
 
     try {
+      // Schrijf 'connecting' naar pi_devices vóór de UPnP-call zodat de
+      // webapp meteen "loading <title>" kan tonen i.p.v. een leeg vinyl.
+      await piState.setConnecting(track);
       const playUrl = await resolveUrlForAdapter(track.url, track.id);
       await currentAdapter.play(playUrl, {
         id: track.id,
@@ -215,10 +279,14 @@ async function runLibraryMode() {
         artist: track.artist,
         cas: track.cas,
       });
+      // Audio is bevestigd onderweg — flip naar 'playing' zodat de webapp
+      // de progress-bar lokaal kan animeren vanuit current_track_started_at.
+      await piState.setNowPlaying(track);
       const finalState = await currentAdapter.waitUntilEnded({ maxMs: 10 * 60_000 });
       log(`Track klaar (${finalState})`);
     } catch (err) {
       log(`Play-fout: ${err.message} — wacht 10s, probeer volgende`);
+      try { await piState.setIdle(); } catch {}
       await new Promise(r => setTimeout(r, 10_000));
     }
   }
