@@ -105,6 +105,12 @@ async function runTestMode() {
 // totdat 'ie weer op false staat. Begint false (we draaien direct na startup).
 let pauseRequested = false;
 
+// Routing-flag — true wanneer stores.playback_source != 'pi'. Operator heeft
+// in het dashboard terug naar Webapp-mode getoggled; webapp neemt dan zelf
+// playback over (in-browser <audio>). Pi moet stoppen anders speelt audio
+// dubbel (browser + Sonos). Symmetrisch resume bij flip terug naar 'pi'.
+let routedAway = false;
+
 async function runLibraryMode() {
   requireLibraryConfig();
 
@@ -114,6 +120,7 @@ async function runLibraryMode() {
   const piDevice = await import('./pi-device.mjs');
   const piState = await import('./pi-state.mjs');
   const controlListener = await import('./pi-control-listener.mjs');
+  const storeListener = await import('./store-listener.mjs');
 
   // Sign in BEFORE the heartbeat starts — heartbeat insert depends on the
   // session being live (RLS rejects anonymous writes).
@@ -139,6 +146,23 @@ async function runLibraryMode() {
       .update({ pause_requested: false, skip_requested_at: null })
       .eq('id', piDevice.getPiDeviceId());
   } catch { /* non-fatal — listener werkt ook zonder deze cleanup */ }
+
+  // Watch stores.playback_source — wanneer operator naar Webapp-mode toggled
+  // moet de Pi stoppen om dubbel-audio te voorkomen.
+  await storeListener.startStoreListener({
+    onChange: async (next) => {
+      const shouldBeRoutedAway = next !== 'pi';
+      if (shouldBeRoutedAway === routedAway) return;
+      routedAway = shouldBeRoutedAway;
+      if (routedAway) {
+        log('Store routing flipte naar webapp — Pi gaat idle');
+        try { await currentAdapter.stop(); } catch {}
+        try { await piState.setIdle(); } catch {}
+      } else {
+        log('Store routing flipte terug naar pi — pulse loop pakt het weer op');
+      }
+    },
+  });
 
   // Listen voor skip/pause-commando's vanuit het webapp-dashboard.
   await controlListener.startPiControlListener({
@@ -186,12 +210,14 @@ async function runLibraryMode() {
       try { discovery.stopSonosDiscovery(); } catch {}
       try { await listener.stopSonosListener(); } catch {}
       try { await controlListener.stopPiControlListener(); } catch {}
+      try { await storeListener.stopStoreListener(); } catch {}
       try { await piState.setIdle(); } catch {}
     };
   } else {
     stopAuxiliaries = async () => {
       try { piDevice.stopTouchInterval(); } catch {}
       try { await controlListener.stopPiControlListener(); } catch {}
+      try { await storeListener.stopStoreListener(); } catch {}
       try { await piState.setIdle(); } catch {}
     };
   }
@@ -218,6 +244,15 @@ async function runLibraryMode() {
   };
 
   while (running) {
+    // Routed away: operator heeft store-source op 'webapp' gezet. Audio
+    // moet niet via deze Pi lopen anders speelt 't dubbel. Heartbeat draait
+    // gewoon door zodat dashboard ziet dat de Pi nog leeft.
+    if (routedAway) {
+      await ensureIdleState('routed_away');
+      await new Promise(r => setTimeout(r, 2_000));
+      continue;
+    }
+
     // Pause-mode: webapp heeft pause_requested gezet. Loop blijft idle tot
     // play_requested-flip de pauseRequested vlag op false zet. Heartbeat
     // blijft doorlopen zodat het dashboard ziet dat we leven.
