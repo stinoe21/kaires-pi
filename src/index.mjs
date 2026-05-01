@@ -108,7 +108,7 @@ let pauseRequested = false;
 async function runLibraryMode() {
   requireLibraryConfig();
 
-  const { signIn } = await import('./lib/supabase.mjs');
+  const { signIn, supabase } = await import('./lib/supabase.mjs');
   const library = await import('./library.mjs');
   const heartbeat = await import('./heartbeat.mjs');
   const piDevice = await import('./pi-device.mjs');
@@ -128,6 +128,17 @@ async function runLibraryMode() {
   // Reset playback state to 'idle' op startup zodat we niet met stale
   // current_track_* van een vorige run draaien.
   await piState.setIdle();
+
+  // Clear stale operator-pause op startup. Een Pi-restart komt vaak van
+  // power-cut / OS-update — als de klant gisteren pauseerde wil 'ie vandaag
+  // niet uren-stilte. Bovendien toont PlayerCard in (paused + geen track)
+  // state geen knoppen, dus zonder dit blijft de klant vastzitten.
+  try {
+    await supabase
+      .from('pi_devices')
+      .update({ pause_requested: false, skip_requested_at: null })
+      .eq('id', piDevice.getPiDeviceId());
+  } catch { /* non-fatal — listener werkt ook zonder deze cleanup */ }
 
   // Listen voor skip/pause-commando's vanuit het webapp-dashboard.
   await controlListener.startPiControlListener({
