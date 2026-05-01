@@ -10,7 +10,7 @@
 // - Disable-on-table-missing logic behouden
 
 import { hostname } from 'node:os';
-import { supabase } from './lib/supabase.mjs';
+import { supabase, getSignedInUserId } from './lib/supabase.mjs';
 import { config } from './config.mjs';
 
 const HOST = hostname();
@@ -38,8 +38,9 @@ async function sendHeartbeat() {
   try {
     const { error } = await supabase.from('pilot_heartbeat').insert({
       store_id: config.store.id ?? null,
-      user_id: null,                      // Pi heeft geen auth-user
+      user_id: getSignedInUserId(),       // Pi-auth user — vereist voor RLS
       provider: 'pi',
+      source: 'pi',                       // sluit aan op stores.playback_source
       is_foreground: true,                // Pi draait als service, altijd "actief"
       agent_enabled: true,
       last_track_id: lastTrackId,

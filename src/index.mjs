@@ -101,8 +101,14 @@ async function runTestMode() {
 async function runLibraryMode() {
   requireLibraryConfig();
 
+  const { signIn } = await import('./lib/supabase.mjs');
   const library = await import('./library.mjs');
   const heartbeat = await import('./heartbeat.mjs');
+
+  // Sign in BEFORE the heartbeat starts — heartbeat insert depends on the
+  // session being live (RLS rejects anonymous writes).
+  const piUserId = await signIn();
+  log(`Pi-auth signed in as ${config.pi.email} (uid ${piUserId.slice(0, 8)}…)`);
 
   log(`Library-mode voor store ${config.store.id}`);
   heartbeat.startHeartbeat();

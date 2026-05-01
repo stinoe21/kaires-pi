@@ -40,6 +40,10 @@ export const config = {
     url: optional('SUPABASE_URL'),
     anonKey: optional('SUPABASE_ANON_KEY'),
   },
+  pi: {
+    email: optional('KAIRES_PI_EMAIL'),
+    password: optional('KAIRES_PI_PASSWORD'),
+  },
   testAudioUrl: optional(
     'KAIRES_TEST_AUDIO_URL',
     'https://archive.org/download/testmp3testfile/mpthreetest.mp3'
@@ -75,6 +79,8 @@ export function requireLibraryConfig() {
   if (!config.supabase.url) missing.push('SUPABASE_URL');
   if (!config.supabase.anonKey) missing.push('SUPABASE_ANON_KEY');
   if (!config.store.id) missing.push('KAIRES_STORE_ID');
+  if (!config.pi.email) missing.push('KAIRES_PI_EMAIL');
+  if (!config.pi.password) missing.push('KAIRES_PI_PASSWORD');
   if (missing.length > 0) {
     throw new Error(
       `Library-mode vereist deze env vars: ${missing.join(', ')}.\n` +
