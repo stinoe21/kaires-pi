@@ -122,6 +122,27 @@ export async function setTargetSpeaker(speaker) {
   log(`Switch target → ${speaker.room_name} @ ${nextIp}`);
   currentTargetIp = nextIp;
   coordinator = await connectToIp(nextIp);
+
+  // DB-volume direct toepassen op nieuwe coordinator zodat hardware-volume en
+  // dashboard-slider niet uit sync raken bij een speaker-switch.
+  if (typeof speaker.volume_pct === 'number') {
+    await setVolume(speaker.volume_pct);
+  }
+}
+
+/**
+ * Zet het volume op de huidige coordinator. Stilzwijgend genegeerd als er
+ * geen target gezet is — listener vuurt soms voor connect klaar is.
+ */
+export async function setVolume(value) {
+  if (!coordinator) return;
+  const v = Math.max(0, Math.min(100, Math.round(value)));
+  try {
+    await coordinator.setVolume(v);
+    log(`Volume → ${v}`);
+  } catch (err) {
+    log(`setVolume(${v}) faalde: ${err.message}`);
+  }
 }
 
 export function hasTarget() {

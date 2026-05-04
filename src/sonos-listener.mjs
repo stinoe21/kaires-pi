@@ -12,6 +12,7 @@ import { config } from './config.mjs';
 
 let activeSpeaker = null;
 let onChangeCallback = null;
+let onVolumeChangeCallback = null;
 let channel = null;
 
 function log(msg) {
@@ -27,7 +28,7 @@ function log(msg) {
 async function fetchActive() {
   const { data, error } = await supabase
     .from('sonos_speakers')
-    .select('id, room_name, ip_address, sonos_uuid')
+    .select('id, room_name, ip_address, sonos_uuid, volume_pct')
     .eq('store_id', config.store.id)
     .eq('is_active_output', true)
     .order('last_seen_at', { ascending: false })
@@ -48,8 +49,25 @@ function isSameSpeaker(a, b) {
 
 async function syncFromDb(reason) {
   const next = await fetchActive();
-  if (isSameSpeaker(activeSpeaker, next)) return;
   const previous = activeSpeaker;
+  const sameSpeaker = isSameSpeaker(previous, next);
+
+  // Volume-only change — zelfde speaker, alleen volume_pct anders. Adapter
+  // zet 'm direct (geen track-stop, geen reconnect).
+  if (sameSpeaker && next && previous && next.volume_pct !== previous.volume_pct) {
+    activeSpeaker = next;
+    if (onVolumeChangeCallback) {
+      try {
+        await onVolumeChangeCallback(next.volume_pct, next);
+      } catch (err) {
+        log(`onVolumeChange-callback gooide: ${err.message}`);
+      }
+    }
+    return;
+  }
+
+  if (sameSpeaker) return;
+
   activeSpeaker = next;
   if (next) {
     log(`Active speaker (${reason}): ${next.room_name} @ ${next.ip_address}`);
@@ -70,8 +88,9 @@ async function syncFromDb(reason) {
  * `onChange` callback wordt zowel bij startup-sync als bij elke flip aangeroepen,
  * zodat de output-adapter consistent kan reageren.
  */
-export async function startSonosListener({ onChange }) {
+export async function startSonosListener({ onChange, onVolumeChange }) {
   onChangeCallback = onChange ?? null;
+  onVolumeChangeCallback = onVolumeChange ?? null;
 
   // Initial sync — onChange() krijgt eerste-keer-trigger.
   await syncFromDb('initial');

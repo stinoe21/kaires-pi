@@ -204,6 +204,13 @@ async function runLibraryMode() {
           log(`Speaker-switch faalde: ${err.message}`);
         }
       },
+      onVolumeChange: async (value) => {
+        try {
+          await currentAdapter.setVolume(value);
+        } catch (err) {
+          log(`Volume-change faalde: ${err.message}`);
+        }
+      },
     });
     stopAuxiliaries = async () => {
       try { piDevice.stopTouchInterval(); } catch {}
