@@ -34,7 +34,15 @@ export async function getStoreDNA(storeId) {
     .select('*')
     .eq('store_id', storeId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) {
+    // De DNA-tabel is op 2026-05-02 in de webapp gedeprecateerd (zie commit
+    // history Kaires App). Tot deze runtime daar synchroon op getrokken wordt:
+    // table-not-found graceful behandelen als "geen DNA" → fallback path.
+    if (error.code === 'PGRST205' || /retailer_music_dna/i.test(error.message ?? '')) {
+      return null;
+    }
+    throw error;
+  }
   return data;
 }
 
