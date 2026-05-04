@@ -15,8 +15,11 @@ import { config } from './config.mjs';
 
 let channel = null;
 let pollTimer = null;
-let lastApplied = null; // 'pi' | 'webapp' | null
+let lastSource = null; // 'pi' | 'webapp' | null
+let lastSchedule = undefined; // undefined = nooit gefetched; null = expliciet "geen schedule"
+let lastTimezone = null;
 let onChangeCb = null;
+let onScheduleChangeCb = null;
 
 function log(msg) {
   const ts = new Date().toISOString().slice(11, 23);
@@ -26,20 +29,27 @@ function log(msg) {
 async function fetchOwn() {
   const { data, error } = await supabase
     .from('stores')
-    .select('playback_source')
+    .select('playback_source, opening_schedule, timezone')
     .eq('id', config.store.id)
     .maybeSingle();
   if (error) {
     log(`fetch faalde: ${error.message}`);
     return null;
   }
-  return data?.playback_source ?? null;
+  return data;
+}
+
+function scheduleEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  // Cheap structural check — opening_schedule is small (max ~7 days × few slots).
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function applySource(source, reason) {
-  if (source === lastApplied) return;
-  const previous = lastApplied;
-  lastApplied = source;
+  if (source === lastSource) return;
+  const previous = lastSource;
+  lastSource = source;
   log(`playback_source ${previous ?? 'null'} → ${source ?? 'null'} (${reason})`);
   if (onChangeCb) {
     Promise.resolve()
@@ -48,22 +58,53 @@ function applySource(source, reason) {
   }
 }
 
+function applySchedule(schedule, reason) {
+  // First fetch always counts as a change (lastSchedule starts undefined).
+  if (lastSchedule !== undefined && scheduleEqual(schedule, lastSchedule)) return;
+  const previous = lastSchedule;
+  lastSchedule = schedule;
+  if (schedule == null) {
+    log(`opening_schedule ontbreekt — Pi blijft 24/7 actief (${reason})`);
+  } else {
+    const dayCount = Object.values(schedule).filter(d => d?.enabled).length;
+    log(`opening_schedule: ${dayCount} open dag(en) (${reason})`);
+  }
+  if (onScheduleChangeCb) {
+    Promise.resolve()
+      .then(() => onScheduleChangeCb(schedule, previous))
+      .catch(err => log(`onScheduleChange gooide: ${err.message}`));
+  }
+}
+
 async function syncFromDb(reason) {
-  const source = await fetchOwn();
-  if (source !== null) applySource(source, reason);
+  const row = await fetchOwn();
+  if (!row) return;
+  if (row.playback_source !== null && row.playback_source !== undefined) {
+    applySource(row.playback_source, reason);
+  }
+  // opening_schedule mag null zijn — dat is een geldige "geen rooster"-state.
+  applySchedule(row.opening_schedule ?? null, reason);
+  // Timezone: stil cachen, geen log. Verandert in de praktijk nooit.
+  if (typeof row.timezone === 'string' && row.timezone) {
+    lastTimezone = row.timezone;
+  }
 }
 
 /**
- * Subscribe op stores.playback_source voor deze store.
+ * Subscribe op stores.playback_source + stores.opening_schedule voor deze store.
  *
  * @param {Object} cbs
  * @param {(next: string|null, previous: string|null) => Promise<void>|void} cbs.onChange
- *   Wordt op state-overgang aangeroepen. Initial sync triggert óók wanneer er
- *   een waarde uit DB komt — zodat de runtime bij startup direct weet of 'ie
- *   actief moet zijn (source='pi') of idle moet blijven.
+ *   playback_source state-overgang. Initial sync triggert óók wanneer er een
+ *   waarde uit DB komt — zodat de runtime bij startup direct weet of 'ie actief
+ *   moet zijn (source='pi') of idle moet blijven.
+ * @param {(next: object|null, previous: object|null|undefined) => Promise<void>|void} cbs.onScheduleChange
+ *   opening_schedule state-overgang. Eerste sync vuurt ook (previous = undefined).
+ *   `null` = geen rooster geconfigureerd → 24/7 open (backwards-compat).
  */
-export async function startStoreListener({ onChange } = {}) {
+export async function startStoreListener({ onChange, onScheduleChange } = {}) {
   onChangeCb = onChange ?? null;
+  onScheduleChangeCb = onScheduleChange ?? null;
 
   await syncFromDb('initial');
 
@@ -78,8 +119,10 @@ export async function startStoreListener({ onChange } = {}) {
         filter: `id=eq.${config.store.id}`,
       },
       (payload) => {
-        const next = payload.new?.playback_source ?? null;
-        if (next !== null) applySource(next, 'realtime');
+        const row = payload.new ?? {};
+        if (row.playback_source != null) applySource(row.playback_source, 'realtime');
+        // opening_schedule kan null zijn — apply ook bij null-payloads.
+        if ('opening_schedule' in row) applySchedule(row.opening_schedule ?? null, 'realtime');
       },
     )
     .subscribe((status) => {
@@ -103,5 +146,13 @@ export async function stopStoreListener() {
 }
 
 export function getCurrentSource() {
-  return lastApplied;
+  return lastSource;
+}
+
+export function getCurrentOpeningSchedule() {
+  return lastSchedule === undefined ? null : lastSchedule;
+}
+
+export function getCurrentTimezone() {
+  return lastTimezone || 'Europe/Amsterdam';
 }

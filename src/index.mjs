@@ -121,6 +121,7 @@ async function runLibraryMode() {
   const piState = await import('./pi-state.mjs');
   const controlListener = await import('./pi-control-listener.mjs');
   const storeListener = await import('./store-listener.mjs');
+  const { isWithinOpeningHours } = await import('./opening-hours.mjs');
 
   // Sign in BEFORE the heartbeat starts — heartbeat insert depends on the
   // session being live (RLS rejects anonymous writes).
@@ -149,6 +150,8 @@ async function runLibraryMode() {
 
   // Watch stores.playback_source — wanneer operator naar Webapp-mode toggled
   // moet de Pi stoppen om dubbel-audio te voorkomen.
+  // Watch ook opening_schedule — stop direct wanneer 't rooster wijzigt en we
+  // ineens buiten openingstijden vallen (niet pas bij volgende pulse).
   await storeListener.startStoreListener({
     onChange: async (next) => {
       const shouldBeRoutedAway = next !== 'pi';
@@ -160,6 +163,16 @@ async function runLibraryMode() {
         try { await piState.setIdle(); } catch {}
       } else {
         log('Store routing flipte terug naar pi — pulse loop pakt het weer op');
+      }
+    },
+    onScheduleChange: async (next) => {
+      // null = "geen rooster" → 24/7 open, niets te doen.
+      if (next == null) return;
+      const tz = storeListener.getCurrentTimezone();
+      if (!isWithinOpeningHours(next, tz)) {
+        log('opening_schedule: nu buiten openingstijden — stop afspelen');
+        try { await currentAdapter.stop(); } catch {}
+        try { await piState.setIdle(); } catch {}
       }
     },
   });
@@ -266,6 +279,18 @@ async function runLibraryMode() {
     if (pauseRequested) {
       await ensureIdleState('paused');
       await new Promise(r => setTimeout(r, 2_000));
+      continue;
+    }
+
+    // Outside-hours: stores.opening_schedule zegt dat we nu dicht zijn. Loop
+    // blijft idle tot we weer binnen openingstijden vallen. Dit gebeurt
+    // automatisch — geen operator-actie nodig. Heartbeat draait door zodat
+    // het dashboard de Pi nog ziet (de "stoplicht" in admin blijft groen).
+    const schedule = storeListener.getCurrentOpeningSchedule();
+    const tz = storeListener.getCurrentTimezone();
+    if (!isWithinOpeningHours(schedule, tz)) {
+      await ensureIdleState('outside_hours');
+      await new Promise(r => setTimeout(r, 30_000));
       continue;
     }
 
