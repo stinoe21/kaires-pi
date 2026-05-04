@@ -18,21 +18,34 @@
 set -euo pipefail
 
 if [[ $EUID -eq 0 ]]; then
-  echo "Run dit als de 'kaires' user (niet als root) — script gebruikt sudo waar nodig."
+  echo "Run dit als de account-user (niet als root) — script gebruikt sudo waar nodig."
   exit 1
 fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-SERVICE_SRC="$SCRIPT_DIR/kaires-pi.service"
+SERVICE_TEMPLATE="$SCRIPT_DIR/kaires-pi.service"
 SERVICE_DST="/etc/systemd/system/kaires-pi.service"
 
-if [[ ! -f "$SERVICE_SRC" ]]; then
-  echo "Kan $SERVICE_SRC niet vinden. Run dit script vanuit de kaires-pi repo (deploy/install.sh)."
+if [[ ! -f "$SERVICE_TEMPLATE" ]]; then
+  echo "Kan $SERVICE_TEMPLATE niet vinden. Run dit script vanuit de kaires-pi repo (deploy/install.sh)."
   exit 1
 fi
 
-echo "==> 1/5 systemd unit installeren"
-sudo install -m 644 "$SERVICE_SRC" "$SERVICE_DST"
+# Sanity: zorg dat de runtime daadwerkelijk in $HOME/kaires-pi staat
+if [[ ! -f "$HOME/kaires-pi/src/index.mjs" ]]; then
+  echo "Verwacht $HOME/kaires-pi/src/index.mjs — repo niet daar geclonet?"
+  exit 1
+fi
+if [[ ! -f "$HOME/kaires-pi/.env" ]]; then
+  echo "Verwacht $HOME/kaires-pi/.env — kopieer .env.example en vul KAIRES_PI_EMAIL/PASSWORD/etc in."
+  exit 1
+fi
+
+echo "==> 1/5 systemd unit installeren (User=$USER, WorkingDirectory=$HOME/kaires-pi)"
+TMP_UNIT="$(mktemp)"
+sed -e "s|__USER__|$USER|g" -e "s|__HOME__|$HOME|g" "$SERVICE_TEMPLATE" > "$TMP_UNIT"
+sudo install -m 644 "$TMP_UNIT" "$SERVICE_DST"
+rm -f "$TMP_UNIT"
 
 echo "==> 2/5 network-online wait inschakelen"
 sudo systemctl enable systemd-networkd-wait-online.service >/dev/null 2>&1 || \

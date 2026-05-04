@@ -6,9 +6,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=kaires
-WorkingDirectory=/home/kaires/kaires-pi
-EnvironmentFile=/home/kaires/kaires-pi/.env
+User=__USER__
+WorkingDirectory=__HOME__/kaires-pi
+EnvironmentFile=__HOME__/kaires-pi/.env
 ExecStart=/usr/bin/node src/index.mjs
 
 Restart=always
