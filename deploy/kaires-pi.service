@@ -1,0 +1,22 @@
+[Unit]
+Description=Kaires Pi runtime
+Documentation=https://github.com/stijnysmit/kaires-pi
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kaires
+WorkingDirectory=/home/kaires/kaires-pi
+EnvironmentFile=/home/kaires/kaires-pi/.env
+ExecStart=/usr/bin/node src/index.mjs
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

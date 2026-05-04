@@ -144,42 +144,37 @@ Als alle drie groen zijn: Pi → UPnP → Sonos werkt. Klaar voor de echte runti
 
 ---
 
-## 7. Systemd service (later, vóór productie)
+## 7. Systemd service + auto-recovery
 
-Wanneer de runtime in `src/index.mjs` af is:
+Eén script regelt alles: unit installeren, network-online wait, kernel-watchdog, hardware-watchdog. Idempotent — kan vaker draaien.
 
 ```bash
-sudo tee /etc/systemd/system/kaires-pi.service <<'EOF'
-[Unit]
-Description=Kaires Pi runtime
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=kaires
-WorkingDirectory=/home/kaires/kaires-pi
-ExecStart=/usr/bin/node src/index.mjs
-EnvironmentFile=/home/kaires/kaires-pi/.env
-Restart=on-failure
-RestartSec=5
-WatchdogSec=30
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable kaires-pi
-sudo systemctl start kaires-pi
-sudo journalctl -u kaires-pi -f    # live logs
+cd ~/kaires-pi
+git pull
+bash deploy/install.sh
 ```
 
-Hardware watchdog (recovery bij kernel hang):
+Wat het script doet (zie `deploy/install.sh` voor details):
+
+- **`Restart=always`** + `RestartSec=5` + `StartLimitIntervalSec=0` — service herstart bij elke exit (crash, clean stop, OOM-kill) en geeft nooit op.
+- **`After=network-online.target`** — wacht bij boot tot LAN er is, anders crasht Sonos-discovery direct.
+- **`RuntimeWatchdogSec=15`** in systemd config — als kernel hangt reboot de hardware-watchdog automatisch.
+- **`dtparam=watchdog=on`** in `config.txt` — schakelt de Pi 5 hardware-watchdog in (alleen actief na reboot).
+
+**Stroomuitval:** Pi 5 boot vanzelf weer op zodra stroom terug is (default firmware-gedrag). Na deze install start de kaires-pi service vervolgens automatisch — dus echt geen handwerk meer nodig.
+
+**Geen `WatchdogSec=` in de unit** — de Node-runtime heeft nog geen `sd_notify` integratie, dus een service-side watchdog zou de service binnen seconden killen. De systemd-niveau watchdog (stap 3 in install.sh) dekt het lockup-scenario af zonder app-changes.
+
+Live volgen na install:
 ```bash
-sudo nano /etc/systemd/system.conf
-# zet:
-RuntimeWatchdogSec=15
+sudo journalctl -u kaires-pi -f
+```
+
+Reboot-test (verifieert dat alles na power-cycle vanzelf opkomt):
+```bash
+sudo reboot
+# na ~30s: SSH er weer in
+sudo systemctl status kaires-pi    # moet "active (running)" zijn
 ```
 
 ---
