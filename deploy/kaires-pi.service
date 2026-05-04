@@ -1,8 +1,8 @@
 [Unit]
 Description=Kaires Pi runtime
 Documentation=https://github.com/stijnysmit/kaires-pi
-After=network-online.target
-Wants=network-online.target
+After=network-online.target time-sync.target
+Wants=network-online.target time-sync.target
 
 [Service]
 Type=simple

@@ -47,10 +47,14 @@ sed -e "s|__USER__|$USER|g" -e "s|__HOME__|$HOME|g" "$SERVICE_TEMPLATE" > "$TMP_
 sudo install -m 644 "$TMP_UNIT" "$SERVICE_DST"
 rm -f "$TMP_UNIT"
 
-echo "==> 2/5 network-online wait inschakelen"
+echo "==> 2/5 network-online + time-sync wait inschakelen"
 sudo systemctl enable systemd-networkd-wait-online.service >/dev/null 2>&1 || \
   sudo systemctl enable NetworkManager-wait-online.service >/dev/null 2>&1 || \
   echo "    (geen network-online unit gevonden — sla over)"
+# time-sync: cruciaal want Pi 5 heeft geen RTC. Na stroomuitval staat klok
+# op ~2000 — zonder NTP-sync faalt elke HTTPS handshake (cert not yet valid).
+sudo systemctl enable --now systemd-timesyncd.service >/dev/null 2>&1 || true
+sudo timedatectl set-ntp true >/dev/null 2>&1 || true
 
 echo "==> 3/5 RuntimeWatchdogSec=15 via drop-in"
 sudo mkdir -p /etc/systemd/system.conf.d
